@@ -1,0 +1,429 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the golcaracol_profile installation profile.
+ */
+
+
+/**
+ * Implements hook_install().
+ *
+ * Perform actions to set up the site for this profile.
+ *
+ * @see system_install()
+ */
+function golcaracol_profile_install() {
+  // Add text formats.
+  $filtered_html_format = array(
+    'format' => 'filtered_html',
+    'name' => 'Filtered HTML',
+    'weight' => 0,
+    'filters' => array(
+      // URL filter.
+      'filter_url' => array(
+        'weight' => 0,
+        'status' => 1,
+      ),
+      // HTML filter.
+      'filter_html' => array(
+        'weight' => 1,
+        'status' => 1,
+      ),
+      // Line break filter.
+      'filter_autop' => array(
+        'weight' => 2,
+        'status' => 1,
+      ),
+      // HTML corrector filter.
+      'filter_htmlcorrector' => array(
+        'weight' => 10,
+        'status' => 1,
+      ),
+      'node_embed' => array(
+        'weight' => 12,
+        'status' => 1,
+      ),
+    ),
+  );
+  $filtered_html_format = (object) $filtered_html_format;
+  filter_format_save($filtered_html_format);
+
+  $full_html_format = array(
+    'format' => 'full_html',
+    'name' => 'Full HTML',
+    'weight' => 1,
+    'filters' => array(
+      // URL filter.
+      'filter_url' => array(
+        'weight' => 0,
+        'status' => 1,
+      ),
+      // Line break filter.
+      'filter_autop' => array(
+        'weight' => 1,
+        'status' => 1,
+      ),
+      // HTML corrector filter.
+      'filter_htmlcorrector' => array(
+        'weight' => 10,
+        'status' => 1,
+      ),
+      'node_embed' => array(
+        'weight' => 12,
+        'status' => 1,
+      ),
+    ),
+  );
+  $full_html_format = (object) $full_html_format;
+  filter_format_save($full_html_format);
+
+  // Create a default role for site administrators, with all available permissions assigned.
+  $admin_role = new stdClass();
+  $admin_role->name = 'administrator';
+  $admin_role->weight = 2;
+  user_role_save($admin_role);
+  user_role_grant_permissions($admin_role->rid, array_keys(module_invoke_all('permission')));
+  // Set this as the administrator role.
+  variable_set('user_admin_role', $admin_role->rid);
+
+  // Assign user 1 the "administrator" role.
+  db_insert('users_roles')
+    ->fields(array('uid' => 1, 'rid' => $admin_role->rid))
+    ->execute();
+
+  // Enable the admin theme.
+  db_update('system')
+    ->fields(array('status' => 1))
+    ->condition('type', 'theme')
+    ->condition('name', 'seven')
+    ->execute();
+  // Assign permission 'use PHP for settings' to admin role
+  db_insert('role_permission')
+    ->fields(array('rid' => $admin_role->rid, 'permission' => 'use PHP for settings', 'module' => 'system'))
+    ->execute();
+
+  // Disable the default Bartik theme
+  theme_disable(array('bartik'));
+
+  // Any themes without keys here will get numeric keys and so will be enabled,
+  // but not placed into variables.
+  $enable = array(
+    'theme_default' => 'golcaracol',
+    'admin_theme'   => 'rubik',
+  );
+
+  theme_enable($enable);
+
+  variable_set('node_admin_theme', 1);
+
+  foreach ($enable as $var => $theme) {
+    if (!is_numeric($var)) {
+      variable_set($var, $theme);
+    }
+  }
+}
+
+/**
+ * Implements hook_install_tasks().
+ */
+function golcaracol_profile_install_tasks(&$install_state) {
+  $tasks = array();
+
+  $tasks['additional_roles'] = array(
+    'display_name' => st('Add roles'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'create_additional_roles',
+  );
+/*  $tasks['setup_apachesolr'] = array(
+    'display_name' => st('Setup apachesolr'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'setup_apachesolr',
+  );*/
+
+  $tasks['additional_vocabularies'] = array(
+    'display_name' => st('Add vocabularies'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'create_additional_vocabularies',
+  );
+/*
+  $tasks['additional_nodes'] = array(
+    'display_name' => st('Add Nodes'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'create_additional_nodes',
+  );
+  */
+  $tasks['additional_taxonomy_sections_terms'] = array(
+    'display_name' => st('Add main sections'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'create_additional_taxonomy_sections_terms',
+  );
+  /*
+  $tasks['import_nodes'] = array(
+    'display_name' => st('Import nodes'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'import_nodes',
+  );
+  $tasks['populate_home'] = array(
+    'display_name' => st('Populate home'),
+    'display' => TRUE,
+    'type' => 'batch',
+    'run' => INSTALL_TASK_RUN_IF_REACHED,
+    'function' => 'populate_home',
+  );*/
+  return $tasks;
+}
+
+/**
+ * Callback function for the 'additional_roles' task.
+ */
+function create_additional_roles(&$context) {
+  $batch = array(
+    'title' => st('Creating additional roles'),
+  );
+
+  // Add new roles here, the key array becomes the weight when the function
+  // '_custom_add_role' is called.
+  $roles_to_be_added = array();
+  $roles_to_be_added[3] = 'Editor';
+  $roles_to_be_added[4] = 'Comercial';
+  $roles_to_be_added[5] = 'Diseño';
+
+  foreach ($roles_to_be_added as $role_weight => $role_name) {
+    $batch['operations'][] = array('_custom_add_role', array($role_name, $role_weight));
+  }
+
+  return $batch;
+}
+
+/**
+ * Wrapper for the creation of individual roles.
+ */
+function _custom_add_role($name, $weight, &$context) {
+  $role = new stdClass();
+  $role->name = $name;
+  $role->weight = $weight;
+
+  $success = user_role_save($role);
+  if (!$success) {
+      throw new Exception("Role $name could not be created.");
+  }
+
+  user_role_grant_permissions($role->rid, array_keys(module_invoke_all('permission')));
+  return $success;
+}
+
+/*
+ * Callback function for the 'additional_vocabularies' task
+ */
+function create_additional_vocabularies(&$context) {
+  $vocabulary  = array(
+    // Create a default vocabulary named "Tags".
+    'tags'     => (object) array(
+      'name'          => st('Tags'),
+      'description'   => st('Use tags to group articles on similar topics into categories.'),
+      'help'          => st('Enter a comma-separated list of words to describe your content.'),
+      'machine_name'  => 'tags',
+      'module'        => 'taxonomy',
+    ),
+    // Create a default vocabulary named "Section".
+    'section'     => (object) array(
+      'name'          => st('Section'),
+      'description'   => st('Section of portal.'),
+      'machine_name'  => 'section',
+      'module'        => 'taxonomy',
+    ),
+    // Create a default vocabulary named "Author".
+    'author'     => (object) array(
+      'name'          => st('Author'),
+      'description'   => st('Author of content.'),
+      'machine_name'  => 'author',
+      'module'        => 'taxonomy',
+    ),
+  );
+  taxonomy_vocabulary_save($vocabulary['section']);
+  taxonomy_vocabulary_save($vocabulary['tags']);
+  taxonomy_vocabulary_save($vocabulary['author']);
+}
+
+/**
+* Callback function for the 'additional_taxonomy_sections_terms' task.
+*/
+function create_additional_taxonomy_sections_terms(&$context) {
+  $vocabulary = taxonomy_vocabulary_machine_name_load('section');
+  $vid = $vocabulary->vid;
+  $variables_term = array();
+  //List of terms to built
+  $variables_term[] = array('name' => 'Video', 'vid' => $vid);
+  $variables_term[] = array('name' => 'Galería', 'vid' => $vid);
+  $variables_term[] = array('name' => 'Sede', 'vid' => $vid);
+  $variables_term[] = array('name' => 'Noticias', 'vid' => $vid);
+  $variables_term[] = array('name' => 'Opinión', 'vid' => $vid);
+
+  $batch = array(
+    'title' => st('Creating Terms of taxonomy section'),
+  );
+
+  foreach ($variables_term as $key => $term) {
+    $batch['operations'][] = array('_add_section_term', array($term));
+  }
+  return $batch;
+}
+
+/*
+ * Callback function for the 'additional_nodes' task
+ */
+function create_additional_nodes(&$context) {
+  $batch = array(
+    'title' => st('Creating nodes type basic page'),
+  );
+  // Add new panels here, the key array becomes the weight when the function
+  $nodes_to_be_added = array();
+  $nodes_to_be_added = basic_pages_list();
+
+  foreach ($nodes_to_be_added as $key => $node) {
+    $batch['operations'][] = array('_custom_add_nodes', array($node));
+  }
+  return $batch;
+}
+
+/**
+ * Wrapper for the creation of individual Panels.
+ */
+function _custom_add_nodes($node, &$context) {
+  try {
+    basic_page_create_node($node['name'], $node['body'], $node['alias']);
+    $context['message'] = 'Node ' . $node['name'];
+  }
+  catch (Exception $e) {
+    watchdog('node save', $e, array(), WATCHDOG_ERROR);
+    $context['message'] = 'Node ' . $e;
+  }
+}
+
+/**
+ * Add new term to section taxonomy
+ */
+function _add_section_term($term_add, &$context){
+  try {
+    $term = new stdClass();
+    $term->name = $term_add['name'];
+    $term->vid = $term_add['vid'];
+    taxonomy_term_save($term);
+  } catch (Exception $e) {
+    watchdog('node save', $e, array(), WATCHDOG_ERROR);
+     return FALSE;
+  }
+  return TRUE;
+}
+
+/**
+ * Callback function for the 'setup_apachesolr' task.
+ */
+function setup_apachesolr(&$context){
+  $batch = array(
+    'title' => st('Setting up apachesolr'),
+  );
+
+  $batch['operations'][] = array('_delete_apachesolr_taxonomy_search_page', array());
+  $batch['operations'][] = array('_delete_default_apachesolr_environment', array());
+
+  return $batch;
+}
+
+function _delete_apachesolr_taxonomy_search_page(&$context){
+  db_delete('apachesolr_search_page')
+    ->condition('page_id', 'taxonomy_search')
+    ->execute();
+
+  return TRUE;
+}
+
+function _delete_default_apachesolr_environment(&$context){
+  apachesolr_environment_delete('solr');
+  return TRUE;
+}
+
+/**
+ * Callback function for the 'import_nodes' task.
+ */
+function import_nodes(&$context) {
+  //Setup BATCH
+  $batch = array(
+    'title' => st('Importing nodes'),
+    'operations' => array(
+      array('create_importer', array('icck_json', 50)),
+      array('feeds_batch', array('import', 'icck_json', 0)),
+    ),
+    'progress_message' => '',
+  );
+
+  return $batch;
+}
+
+
+
+/**
+ * Callback function for the 'populate_home' task.
+ */
+function populate_home(&$context){
+  $batch = array(
+    'title' => st('Populate home with last nodes'),
+  );
+
+  $nodes = node_get_recent(20);
+  $batch['operations'][] = array('_nodes_in_queues', array($nodes));
+  return $batch;
+}
+
+
+function _nodes_in_queues($nodes = array(), &$context){
+
+  try{
+
+    if($nodes){
+      //Queue de slide de notas principales
+      $queue_outstanding = nodequeue_load_queue_by_name('important');
+      if($queue_outstanding->qid)
+        $subqueue_outstanding = nodequeue_load_subqueues_by_queue($queue_outstanding->qid);
+      //Queue de notas centrales
+      $queue_central_notes = nodequeue_load_queue_by_name('collage');
+      if($queue_central_notes->qid)
+        $subqueue_central_notes = nodequeue_load_subqueues_by_queue($queue_central_notes->qid);
+      //Queue de notas centrales
+      $queue_collage = nodequeue_load_queue_by_name('central_notes');
+      if($queue_collage->qid)
+        $subqueue_collage= nodequeue_load_subqueues_by_queue($queue_collage->qid);
+
+      $i = 0;
+      foreach ($nodes as $key => $node) {
+        if($i < 5){
+          nodequeue_subqueue_add($queue_outstanding, $subqueue_outstanding[$queue_outstanding->qid], $node->nid);
+        }
+        elseif($i < 10){
+          nodequeue_subqueue_add($queue_central_notes, $subqueue_central_notes[$queue_central_notes->qid], $node->nid);
+        }
+        else{
+          nodequeue_subqueue_add($queue_collage, $subqueue_collage[$queue_collage->qid], $node->nid);
+        }
+        $i++;
+      }
+    }
+    return TRUE;
+  } catch (Exception $e) {
+    watchdog('populate home', $e, array(), WATCHDOG_ERROR);
+     return FALSE;
+  }
+
+}
